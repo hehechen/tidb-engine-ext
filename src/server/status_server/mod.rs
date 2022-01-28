@@ -28,6 +28,7 @@ use openssl::ssl::{
 };
 use openssl::x509::X509;
 use pin_project::pin_project;
+#[cfg(target_arch = "x86_64")]
 use pprof::protos::Message;
 use raftstore::store::{transport::CasualRouter, CasualMessage};
 use regex::Regex;
@@ -131,7 +132,7 @@ impl StatusServer<(), ()> {
             })
             .unwrap_or_else(|| thread_name.to_owned())
     }
-
+    #[cfg(target_arch = "x86_64")]
     fn frames_post_processor() -> impl Fn(&mut pprof::Frames) {
         move |frames| {
             let name = Self::extract_thread_name(&frames.thread_name);
@@ -339,7 +340,16 @@ where
             ),
         })
     }
+    /// Currently, on aarch64 architectures, the underlying libgcc/llvm-libunwind/... which pprof-rs
+    /// depends on has a segmentation fault (when backtracking happens in the signal handler).
+    /// So, for now, we only allow the x86_64 architecture to perform real profiling, other
+    /// architectures will directly return an error until we fix the seg-fault in backtrace.
+    #[cfg(not(target_arch = "x86_64"))]
+    pub async fn dump_rsprof(seconds: u64, frequency: i32) -> pprof::Result<pprof::Report> {
+        Err("unsupported arch")
+    }
 
+    #[cfg(target_arch = "x86_64")]
     pub async fn dump_rsprof(seconds: u64, frequency: i32) -> pprof::Result<pprof::Report> {
         let guard = pprof::ProfilerGuardBuilder::default()
             .frequency(frequency)
