@@ -729,6 +729,8 @@ where
     peer_cache: RefCell<HashMap<u64, metapb::Peer>>,
     /// Record the last instant of each peer's heartbeat response.
     pub peer_heartbeats: HashMap<u64, Instant>,
+    /// Record the applied index of each follower or learner peer.
+    pub peer_applied_indices: HashMap<u64, u64>,
 
     proposals: ProposalQueue<EK::Snapshot>,
     leader_missing_time: Option<Instant>,
@@ -950,6 +952,7 @@ where
             long_uncommitted_threshold: cfg.long_uncommitted_base_threshold.0,
             peer_cache: RefCell::new(HashMap::default()),
             peer_heartbeats: HashMap::default(),
+            peer_applied_indices: HashMap::default(),
             peers_start_pending_time: vec![],
             down_peer_ids: vec![],
             size_diff_hint: 0,
@@ -5159,6 +5162,15 @@ where
             let region = self.region();
             send_msg.set_start_key(region.get_start_key().to_vec());
             send_msg.set_end_key(region.get_end_key().to_vec());
+        }
+
+        match msg.get_msg_type() {
+            MessageType::MsgAppend | MessageType::MsgHeartbeat => {
+                let mut ext_msg = ExtraMessage::default();
+                ext_msg.set_type(ExtraMessageType::MsgCollectPeerApplyIndexProgressRequest);
+                send_msg.set_extra_msg(ext_msg);
+            }
+            _ => {}
         }
 
         send_msg.set_message(msg);

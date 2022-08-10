@@ -2124,12 +2124,30 @@ where
                     res.applied_term,
                     &res.metrics,
                 );
+
                 // After applying, several metrics are updated, report it to pd to
                 // get fair schedule.
                 if self.fsm.peer.is_leader() {
                     self.register_pd_heartbeat_tick();
                     self.register_split_region_check_tick();
                     self.retry_pending_prepare_merge(applied_index);
+                } else {
+                    // If the follower is in hibernate state and apply index is updated,
+                    // send an extra message explicitly.
+                    if self.fsm.hibernate_state.group_state() == GroupState::Idle {
+                        let leader_id = self.fsm.peer.leader_id();
+                        let leader = self.fsm.peer.get_peer_from_cache(leader_id);
+                        if let Some(leader) = leader {
+                            let mut msg = ExtraMessage::default();
+                            msg.set_type(
+                                ExtraMessageType::MsgCollectPeerApplyIndexProgressResponse,
+                            );
+                            msg.applied_index = applied_index;
+                            self.fsm
+                                .peer
+                                .send_extra_message(msg, &mut self.ctx.trans, &leader);
+                        }
+                    }
                 }
             }
             ApplyTaskRes::Destroy {
@@ -2330,7 +2348,9 @@ where
         }
 
         if msg.has_extra_msg() {
-            self.on_extra_message(msg);
+            self.on_extra_message(&mut msg);
+        }
+        if !msg.has_message() {
             return Ok(());
         }
 
@@ -2470,7 +2490,47 @@ where
         self.fsm.hibernate_state.count_vote(from.get_id());
     }
 
-    fn on_extra_message(&mut self, mut msg: RaftMessage) {
+    fn on_collect_peer_apply_index_process_request(&mut self, from: &metapb::Peer) {
+        if self.fsm.peer.is_leader() {
+            return;
+        }
+        let mut msg = ExtraMessage::default();
+        msg.set_type(ExtraMessageType::MsgCollectPeerApplyIndexProgressResponse);
+        msg.applied_index = self.fsm.peer.get_store().applied_index();
+        self.fsm
+            .peer
+            .send_extra_message(msg, &mut self.ctx.trans, from);
+    }
+
+    fn on_collect_peer_apply_index_process_response(
+        &mut self,
+        from: &metapb::Peer,
+        applying_idx: u64,
+    ) {
+        if !self.fsm.peer.is_leader() {
+            return;
+        }
+        if self
+            .fsm
+            .peer
+            .region()
+            .get_peers()
+            .iter()
+            .all(|p| p.get_id() != from.get_id())
+        {
+            self.fsm.peer.peer_applied_indices.remove(&from.get_id());
+            return;
+        }
+        let prev_applying_idx = self
+            .fsm
+            .peer
+            .peer_applied_indices
+            .entry(from.get_id())
+            .or_insert(applying_idx);
+        *prev_applying_idx = applying_idx;
+    }
+
+    fn on_extra_message(&mut self, msg: &mut RaftMessage) {
         match msg.get_extra_msg().get_type() {
             ExtraMessageType::MsgRegionWakeUp | ExtraMessageType::MsgCheckStalePeer => {
                 if self.fsm.hibernate_state.group_state() == GroupState::Idle {
@@ -2502,6 +2562,15 @@ where
             }
             ExtraMessageType::MsgRejectRaftLogCausedByMemoryUsage => {
                 unimplemented!()
+            }
+            ExtraMessageType::MsgCollectPeerApplyIndexProgressRequest => {
+                self.on_collect_peer_apply_index_process_request(msg.get_from_peer());
+            }
+            ExtraMessageType::MsgCollectPeerApplyIndexProgressResponse => {
+                self.on_collect_peer_apply_index_process_response(
+                    msg.get_from_peer(),
+                    msg.get_extra_msg().premerge_commit,
+                );
             }
         }
     }
@@ -3047,6 +3116,7 @@ where
                     } else {
                         self.fsm.peer.transfer_leader(&from);
                     }
+                    self.fsm.peer.peer_applied_indices.clear();
                 }
             }
         } else {
@@ -3491,6 +3561,7 @@ where
                             .peer
                             .peers_start_pending_time
                             .retain(|&(p, _)| p != peer_id);
+                        self.fsm.peer.peer_applied_indices.remove(&peer_id);
                     }
                     self.fsm.peer.remove_peer_from_cache(peer_id);
                     // We only care remove itself now.
