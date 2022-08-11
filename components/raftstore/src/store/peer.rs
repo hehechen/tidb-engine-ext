@@ -1896,7 +1896,7 @@ where
         }
 
         let progresses = status.progress.unwrap().iter();
-        for (&id, progress) in progresses {
+        for (&id, _progress) in progresses {
             if id == self.peer.get_id() {
                 continue;
             }
@@ -1911,33 +1911,35 @@ where
             // So if the `matched` is 0, it must be a pending peer.
             // It can be ensured because `truncated_index` must be greater than
             // `RAFT_INIT_LOG_INDEX`(5).
-            if progress.matched < truncated_idx {
-                if let Some(p) = self.get_peer_from_cache(id) {
-                    pending_peers.push(p);
-                    if !self
-                        .peers_start_pending_time
-                        .iter()
-                        .any(|&(pid, _)| pid == id)
-                    {
-                        let now = Instant::now();
-                        self.peers_start_pending_time.push((id, now));
-                        debug!(
-                            "peer start pending";
+            if let Some(applied_index) = self.peer_applied_indices.get(&id) {
+                if applied_index < &truncated_idx {
+                    if let Some(p) = self.get_peer_from_cache(id) {
+                        pending_peers.push(p);
+                        if !self
+                            .peers_start_pending_time
+                            .iter()
+                            .any(|&(pid, _)| pid == id)
+                        {
+                            let now = Instant::now();
+                            self.peers_start_pending_time.push((id, now));
+                            info!(
+                                "peer start pending";
+                                "region_id" => self.region_id,
+                                "peer_id" => self.peer.get_id(),
+                                "time" => ?now,
+                            );
+                        }
+                    } else {
+                        if ctx.cfg.dev_assert {
+                            panic!("{} failed to get peer {} from cache", self.tag, id);
+                        }
+                        error!(
+                            "failed to get peer from cache";
                             "region_id" => self.region_id,
                             "peer_id" => self.peer.get_id(),
-                            "time" => ?now,
+                            "get_peer_id" => id,
                         );
                     }
-                } else {
-                    if ctx.cfg.dev_assert {
-                        panic!("{} failed to get peer {} from cache", self.tag, id);
-                    }
-                    error!(
-                        "failed to get peer from cache";
-                        "region_id" => self.region_id,
-                        "peer_id" => self.peer.get_id(),
-                        "get_peer_id" => id,
-                    );
                 }
             }
         }
