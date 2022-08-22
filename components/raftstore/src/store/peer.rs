@@ -1936,7 +1936,14 @@ where
             if need_check_safe_ts && let Some(peer_ts) = self.peers_safe_ts.get(&id) {
                 let peer_safe_ts_physical = TimeStamp::new(*peer_ts).physical();
                 if self_safe_ts_physical > peer_safe_ts_physical && self_safe_ts_physical - peer_safe_ts_physical > 2 * 1000 * 60 {
-                    safe_ts_timeout = true
+                    safe_ts_timeout = true;
+                    debug!(
+                        "safe ts timeout";
+                        "region_id" => self.region_id,
+                        "peer_id" => self.peer.get_id(),
+                        "peer_safe_ts_physical" => peer_safe_ts_physical,
+                        "self_safe_ts_physical" => self_safe_ts_physical,
+                    );
                 }
             }
 
