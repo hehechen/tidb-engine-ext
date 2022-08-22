@@ -65,7 +65,7 @@ use tikv_util::{
     Either,
 };
 use time::Timespec;
-use txn_types::WriteBatchFlags;
+use txn_types::{WriteBatchFlags, TimeStamp};
 use uuid::Uuid;
 
 use super::{
@@ -1922,7 +1922,25 @@ where
             // So if the `matched` is 0, it must be a pending peer.
             // It can be ensured because `truncated_index` must be greater than
             // `RAFT_INIT_LOG_INDEX`(5).
-            if progress.matched < truncated_idx {
+
+            let mut need_check_safe_ts = false;
+            if let Some(p) = self.get_peer_from_cache(id) {
+                // TODO: need check if it is TiFlash
+                if p.role == PeerRole::Learner && p.is_witness == false {
+                    need_check_safe_ts = true;
+                }
+            }
+
+            let mut safe_ts_timeout = false;
+            let self_safe_ts_physical = TimeStamp::new(self.read_progress.safe_ts()).physical();
+            if need_check_safe_ts && let Some(peer_ts) = self.peers_safe_ts.get(&id) {
+                let peer_safe_ts_physical = TimeStamp::new(*peer_ts).physical();
+                if self_safe_ts_physical > peer_safe_ts_physical && self_safe_ts_physical - peer_safe_ts_physical > 2 * 1000 * 60 {
+                    safe_ts_timeout = true
+                }
+            }
+
+            if progress.matched < truncated_idx || safe_ts_timeout{
                 if let Some(p) = self.get_peer_from_cache(id) {
                     pending_peers.push(p);
                     if !self
