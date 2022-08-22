@@ -2123,7 +2123,7 @@ where
                     self.register_pd_heartbeat_tick();
                     self.register_split_region_check_tick();
                     self.retry_pending_prepare_merge(applied_index);
-                }
+                } 
             }
             ApplyTaskRes::Destroy {
                 region_id,
@@ -2462,6 +2462,27 @@ where
         self.fsm.hibernate_state.count_vote(from.get_id());
     }
 
+    fn on_trace_peer_availability_info(&mut self, from: &metapb::Peer, msg: &ExtraMessage) {
+        if !self.fsm.peer.is_leader() {
+            return;
+        }
+        let peer_id = from.get_id();
+        if self
+            .fsm
+            .peer
+            .region()
+            .get_peers()
+            .iter()
+            .all(|p| p.get_id() != from.get_id())
+        {
+            self.fsm.peer.peers_safe_ts.remove(&peer_id);
+            self.fsm.peer.peers_miss_data.remove(&peer_id);
+            return;
+        }
+        self.fsm.peer.peers_safe_ts.insert(peer_id, msg.safe_ts);
+        self.fsm.peer.peers_miss_data.insert(peer_id, msg.miss_data);
+    }
+
     fn on_extra_message(&mut self, mut msg: RaftMessage) {
         match msg.get_extra_msg().get_type() {
             ExtraMessageType::MsgRegionWakeUp | ExtraMessageType::MsgCheckStalePeer => {
@@ -2491,6 +2512,12 @@ where
             }
             ExtraMessageType::MsgHibernateResponse => {
                 self.on_hibernate_response(msg.get_from_peer());
+            }
+            ExtraMessageType::MsgRejectRaftLogCausedByMemoryUsage => {
+                unimplemented!()
+            }
+            ExtraMessageType::MsgTracePeerAvailabilityInfo => {
+                self.on_trace_peer_availability_info(msg.get_from_peer(), msg.get_extra_msg());
             }
         }
     }
@@ -3027,6 +3054,8 @@ where
                         );
                     } else {
                         self.fsm.peer.transfer_leader(&from);
+                        self.fsm.peer.peers_safe_ts.clear();
+                        self.fsm.peer.peers_miss_data.clear();
                     }
                 }
             }
