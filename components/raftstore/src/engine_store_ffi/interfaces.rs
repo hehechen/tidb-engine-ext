@@ -442,6 +442,14 @@ pub mod root {
                     buff: root::DB::BaseBuffView,
                 ),
             >,
+            pub fn_handle_safe_ts_update: ::std::option::Option<
+                unsafe extern "C" fn(
+                    arg1: *const root::DB::EngineStoreServerWrap,
+                    arg2: u64,
+                    arg3: u64,
+                    arg4: u64,
+                ),
+            >,
         }
         pub const RAFT_STORE_PROXY_VERSION: u64 = 794398293737678384;
         pub const RAFT_STORE_PROXY_MAGIC_NUMBER: u32 = 324508639;

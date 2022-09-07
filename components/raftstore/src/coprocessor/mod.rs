@@ -147,6 +147,8 @@ pub trait QueryObserver: Coprocessor {
     /// For now, the `region` in `ObserverContext` is an empty region.
     fn post_apply_query(&self, _: &mut ObserverContext<'_>, _: &Cmd) {}
 
+    fn on_update_safe_ts(&self, _: u64, _: u64, _: u64) {}
+
     /// Hook to call immediately after exec command.
     /// Will be a special persistence after this exec if a observer returns true.
     fn post_exec_query(

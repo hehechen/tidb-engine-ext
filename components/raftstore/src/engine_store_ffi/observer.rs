@@ -549,6 +549,12 @@ impl QueryObserver for TiFlashObserver {
         }
         persist
     }
+
+    fn on_update_safe_ts(&self, region_id: u64, self_safe_ts: u64, leader_safe_ts: u64)
+    {
+        self.engine_store_server_helper.handle_safe_ts_update(region_id, self_safe_ts, leader_safe_ts)
+    }
+
 }
 
 impl RegionChangeObserver for TiFlashObserver {

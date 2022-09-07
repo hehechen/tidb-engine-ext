@@ -4203,7 +4203,7 @@ where
         self.fsm
             .peer
             .read_progress
-            .merge_safe_ts(source_read_progress.safe_ts(), merge_index);
+            .merge_safe_ts(source_read_progress.safe_ts(), merge_index, &self.ctx.coprocessor_host);
 
         // If a follower merges into a leader, a more recent read may happen
         // on the leader of the follower. So max ts should be updated after

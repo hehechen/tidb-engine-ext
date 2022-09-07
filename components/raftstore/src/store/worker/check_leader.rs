@@ -12,10 +12,17 @@ use kvproto::kvrpcpb::{KeyRange, LeaderInfo};
 use tikv_util::worker::Runnable;
 
 use crate::store::{fsm::store::StoreMeta, util::RegionReadProgressRegistry};
+use crate::coprocessor::{CoprocessorHost};
+use engine_traits::{KvEngine};
+use engine_test::{kv::KvTestEngine,};
 
-pub struct Runner {
+pub struct Runner<E> 
+where
+    E: KvEngine,
+{
     store_meta: Arc<Mutex<StoreMeta>>,
     region_read_progress: RegionReadProgressRegistry,
+    coprocessor: CoprocessorHost<E>
 }
 
 pub enum Task {
@@ -47,12 +54,16 @@ impl fmt::Display for Task {
     }
 }
 
-impl Runner {
-    pub fn new(store_meta: Arc<Mutex<StoreMeta>>) -> Runner {
+impl<E> Runner<E> 
+where
+    E: KvEngine,
+{
+    pub fn new(store_meta: Arc<Mutex<StoreMeta>>, coprocessor: CoprocessorHost<E>) -> Runner<E> {
         let region_read_progress = store_meta.lock().unwrap().region_read_progress.clone();
         Runner {
             region_read_progress,
             store_meta,
+            coprocessor
         }
     }
 
@@ -95,7 +106,10 @@ impl Runner {
     }
 }
 
-impl Runnable for Runner {
+impl<E> Runnable for Runner<E> 
+where
+    E: KvEngine,
+{
     type Task = Task;
     fn run(&mut self, task: Task) {
         match task {
@@ -110,7 +124,7 @@ impl Runnable for Runner {
                     self.store_meta.lock().unwrap().store_id == Some(3),
                     |_| {}
                 );
-                let regions = self.region_read_progress.handle_check_leaders(leaders);
+                let regions = self.region_read_progress.handle_check_leaders(leaders, &self.coprocessor);
                 cb(regions);
             }
             Task::GetStoreTs { key_range, cb } => {
@@ -154,7 +168,8 @@ mod tests {
         }
 
         let meta = Arc::new(Mutex::new(StoreMeta::new(0)));
-        let runner = Runner::new(meta.clone());
+        let mut coprocessor_host = CoprocessorHost::<KvTestEngine>::default();
+        let runner = Runner::new(meta.clone(), coprocessor_host.clone());
         assert_eq!(0, runner.get_range_safe_ts(key_range(b"", b"")));
         add_region(&meta, 1, key_range(b"", b"k1"), 100);
         assert_eq!(100, runner.get_range_safe_ts(key_range(b"", b"")));
