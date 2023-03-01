@@ -23,6 +23,7 @@ pub mod raftstore_proxy_helper_impls;
 pub mod read_index_helper;
 pub mod sst_reader_impls;
 pub mod utils;
+pub mod apply_router_helper;
 
 pub use self::{
     basic_ffi_impls::*, domain_impls::*, encryption_impls::*, engine_store_helper_impls::*,

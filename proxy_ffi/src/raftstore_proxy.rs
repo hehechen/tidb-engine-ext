@@ -7,6 +7,8 @@ use std::sync::{
 
 use encryption::DataKeyManager;
 
+use crate::apply_router_helper;
+
 use super::{
     interfaces_ffi::{ConstRawVoidPtr, RaftProxyStatus, RaftStoreProxyPtr},
     raftstore_proxy_helper_impls::*,
@@ -20,6 +22,7 @@ pub struct RaftStoreProxy {
     key_manager: Option<Arc<DataKeyManager>>,
     read_index_client: Option<Box<dyn read_index_helper::ReadIndex>>,
     raftstore_proxy_engine: RwLock<Option<Eng>>,
+    apply_router_client: Option<Box<dyn apply_router_helper::ApplyRouterHelper>>,
 }
 
 impl RaftStoreProxy {
@@ -28,12 +31,14 @@ impl RaftStoreProxy {
         key_manager: Option<Arc<DataKeyManager>>,
         read_index_client: Option<Box<dyn read_index_helper::ReadIndex>>,
         raftstore_proxy_engine: Option<Eng>,
+        apply_router_client: Option<Box<dyn apply_router_helper::ApplyRouterHelper>>,
     ) -> Self {
         RaftStoreProxy {
             status,
             key_manager,
             read_index_client,
             raftstore_proxy_engine: RwLock::new(raftstore_proxy_engine),
+            apply_router_client,
         }
     }
 }
@@ -92,6 +97,10 @@ impl RaftStoreProxyFFI for RaftStoreProxy {
 
     fn set_status(&mut self, s: RaftProxyStatus) {
         self.status.store(s as u8, Ordering::SeqCst);
+    }
+
+    fn maybe_apply_router_helper(&self) -> &Option<Box<dyn apply_router_helper::ApplyRouterHelper>> {
+        &self.apply_router_client
     }
 }
 

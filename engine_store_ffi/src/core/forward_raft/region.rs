@@ -116,4 +116,9 @@ impl<T: Transport + 'static, ER: RaftEngine> ProxyForwarder<T, ER> {
             .access_cached_region_info_mut(region_id, f)
             .unwrap();
     }
+
+    pub fn get_compact_index_and_term(&self, region_id: u64) -> (u64, u64) {
+        return self.engine_store_server_helper.get_persisted_state(region_id);
+    }
+
 }

@@ -329,6 +329,14 @@ impl EngineStoreServerHelper {
         debug_assert!(self.fn_fast_add_peer.is_some());
         unsafe { (self.fn_fast_add_peer.into_inner())(self.inner, region_id, new_peer_id) }
     }
+
+    pub fn get_persisted_state(&self, region_id: u64) -> (u64, u64) {
+        debug_assert!(self.fn_get_flushed_state.is_some());
+        unsafe { 
+            let flushed_state = (self.fn_get_flushed_state.into_inner())(self.inner, region_id);
+            return (flushed_state.applied_index, flushed_state.applied_term);
+        }
+    }
 }
 
 // PageStorage specific

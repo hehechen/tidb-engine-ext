@@ -192,6 +192,10 @@ struct FastAddPeerRes {
   CppStrWithView region;
 };
 
+struct FlushedState {
+    uint64_t applied_index;
+    uint64_t applied_term;
+};
 struct RaftStoreProxyFFIHelper {
   RaftStoreProxyPtr proxy_ptr;
   RaftProxyStatus (*fn_handle_get_proxy_status)(RaftStoreProxyPtr);
@@ -221,6 +225,8 @@ struct RaftStoreProxyFFIHelper {
   KVGetStatus (*fn_get_region_local_state)(RaftStoreProxyPtr,
                                            uint64_t region_id, RawVoidPtr data,
                                            RawCppStringPtr *error_msg);
+  void (*fn_notify_compact_log)(RaftStoreProxyPtr, uint64_t, uint64_t,
+                                uint64_t, uint64_t);
 };
 
 struct PageStorageInterfaces {
@@ -288,5 +294,6 @@ struct EngineStoreServerHelper {
                                    uint64_t leader_safe_ts);
   FastAddPeerRes (*fn_fast_add_peer)(EngineStoreServerWrap *,
                                      uint64_t region_id, uint64_t new_peer_id);
+  FlushedState (*fn_get_flushed_state)(EngineStoreServerWrap *, uint64_t region_id);
 };
 }  // namespace DB

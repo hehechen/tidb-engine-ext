@@ -35,6 +35,7 @@ use engine_store_ffi::{
             RaftStoreProxyFFIHelper,
         },
         read_index_helper::ReadIndexClient,
+        apply_router_helper::ProxyApplyRouterHelper,
         RaftStoreProxy, RaftStoreProxyFFI,
     },
     TiFlashEngine,
@@ -148,6 +149,7 @@ pub fn run_impl<CER: ConfiguredRaftEngine, F: KvFormat>(
             SysQuota::cpu_cores_quota() as usize * 2,
         ))),
         None,
+        Some(Box::new(ProxyApplyRouterHelper::new(tikv.system.as_ref().unwrap().apply_router()))),
     );
 
     let proxy_ref = &proxy;
@@ -255,6 +257,7 @@ fn run_impl_only_for_decryption<CER: ConfiguredRaftEngine, F: KvFormat>(
         AtomicU8::new(RaftProxyStatus::Idle as u8),
         encryption_key_manager.clone(),
         Option::None,
+        None,
         None,
     );
 

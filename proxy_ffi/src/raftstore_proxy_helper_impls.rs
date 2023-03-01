@@ -13,6 +13,8 @@ use std::{
 use encryption::DataKeyManager;
 use kvproto::kvrpcpb;
 use protobuf::Message;
+use tikv_util::store::region;
+use raftstore::store::fsm::ApplyTask;
 
 use super::{
     basic_ffi_impls::*,
@@ -27,6 +29,7 @@ use super::{
     read_index_helper,
     sst_reader_impls::*,
     utils, UnwrapExternCFunc,
+    apply_router_helper,
 };
 
 impl Clone for RaftStoreProxyPtr {
@@ -52,6 +55,7 @@ pub trait RaftStoreProxyFFI: Sync {
     //     F: FnOnce(Result<Option<&[u8]>, String>);
     // fn set_kv_engine(&mut self, kv_engine: Option<EK>);
     // fn kv_engine(&self) -> &RwLock<Option<EK>>;
+    fn maybe_apply_router_helper(&self) -> &Option<Box<dyn apply_router_helper::ApplyRouterHelper>>;
 }
 
 impl RaftStoreProxyFFIHelper {
@@ -82,6 +86,7 @@ impl RaftStoreProxyFFIHelper {
             fn_make_timer_task: Some(ffi_make_timer_task),
             fn_poll_timer_task: Some(ffi_poll_timer_task),
             fn_get_region_local_state: Some(ffi_get_region_local_state),
+            fn_notify_compact_log: Some(ffi_notify_compact_log),
         }
     }
 }
@@ -282,4 +287,30 @@ pub unsafe extern "C" fn ffi_poll_timer_task(task_ptr: RawVoidPtr, waker: RawVoi
     } else {
         0
     }
+}
+
+pub extern "C" fn ffi_notify_compact_log(
+    proxy_ptr: RaftStoreProxyPtr,
+    region_id: u64,
+    compact_index: u64,
+    compact_term: u64,
+    applied_index: u64) {
+        assert!(!proxy_ptr.is_null());
+        unsafe {
+            if proxy_ptr.as_ref().maybe_apply_router_helper().is_none() {
+                return;
+            }
+        }
+        unsafe {
+            proxy_ptr
+                .as_ref()
+                .maybe_apply_router_helper()
+                .as_ref()
+                .unwrap()
+                .schedule_compact_log_task(
+                    region_id,
+                    compact_index,
+                    compact_term,
+                    applied_index)
+        }
 }

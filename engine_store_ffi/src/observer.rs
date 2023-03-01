@@ -193,6 +193,12 @@ impl<T: Transport + 'static, ER: RaftEngine> MessageObserver for TiFlashObserver
     fn on_raft_message(&self, msg: &RaftMessage) -> bool {
         self.forwarder.on_raft_message(msg)
     }
+    fn compact_log_in_queue(&self) -> bool {
+        false
+    }
+    fn get_compact_index_and_term(&self, region_id: u64, compact_index: u64, compact_term: u64) -> (u64, u64) {
+        return self.forwarder.get_compact_index_and_term(region_id);
+    }
 }
 
 impl<T: Transport + 'static, ER: RaftEngine> PdTaskObserver for TiFlashObserver<T, ER> {

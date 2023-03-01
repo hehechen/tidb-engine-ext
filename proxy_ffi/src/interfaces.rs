@@ -284,6 +284,12 @@ pub mod root {
         }
         #[repr(C)]
         #[derive(Debug)]
+        pub struct FlushedState {
+            pub applied_index: u64,
+            pub applied_term: u64,
+        }
+        #[repr(C)]
+        #[derive(Debug)]
         pub struct RaftStoreProxyFFIHelper {
             pub proxy_ptr: root::DB::RaftStoreProxyPtr,
             pub fn_handle_get_proxy_status: ::std::option::Option<
@@ -382,6 +388,15 @@ pub mod root {
                     data: root::DB::RawVoidPtr,
                     error_msg: *mut root::DB::RawCppStringPtr,
                 ) -> root::DB::KVGetStatus,
+            >,
+            pub fn_notify_compact_log: ::std::option::Option<
+                unsafe extern "C" fn(
+                    arg1: root::DB::RaftStoreProxyPtr,
+                    arg2: u64,
+                    arg3: u64,
+                    arg4: u64,
+                    arg5: u64,
+                ),
             >,
         }
         #[repr(C)]
@@ -583,6 +598,12 @@ pub mod root {
                     region_id: u64,
                     new_peer_id: u64,
                 ) -> root::DB::FastAddPeerRes,
+            >,
+            pub fn_get_flushed_state: ::std::option::Option<
+                unsafe extern "C" fn(
+                    arg1: *mut root::DB::EngineStoreServerWrap,
+                    region_id: u64,
+                ) -> root::DB::FlushedState,
             >,
         }
         pub const RAFT_STORE_PROXY_VERSION: u64 = 4990756589462826693;

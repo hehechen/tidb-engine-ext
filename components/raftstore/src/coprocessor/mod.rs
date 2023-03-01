@@ -343,6 +343,14 @@ pub trait MessageObserver: Coprocessor {
     fn on_raft_message(&self, _: &RaftMessage) -> bool {
         true
     }
+
+    /// Returns true if need to get compact log index from pending queue.
+    fn compact_log_in_queue(&self) -> bool {
+        true
+    }
+    fn get_compact_index_and_term(&self, region_id: u64, compact_index: u64, compact_term: u64) -> (u64, u64) {
+        return (compact_index, compact_term);
+    }
 }
 
 #[derive(Clone, Debug, Default)]

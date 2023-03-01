@@ -846,6 +846,30 @@ impl<E: KvEngine> CoprocessorHost<E> {
         }
     }
 
+    pub fn compact_log_in_queue(&self) -> bool {
+        for observer in &self.registry.message_observers {
+            let observer = observer.observer.inner();
+            return observer.compact_log_in_queue();
+        }
+        return true;
+    }
+
+    pub fn need_reset_applied_index(&self) -> bool {
+        for observer in &self.registry.message_observers {
+            let observer = observer.observer.inner();
+            return observer.need_reset_applied_index();
+        }
+        return false;
+    }
+
+    pub fn get_compact_index_and_term(&self, region_id: u64, compact_index: u64, compact_term: u64) -> (u64, u64) {
+        for observer in &self.registry.message_observers {
+            let observer = observer.observer.inner();
+            return observer.get_compact_index_and_term(region_id, compact_index, compact_term);
+        }
+        return (compact_index, compact_term);
+    }
+
     pub fn shutdown(&self) {
         for entry in &self.registry.admin_observers {
             entry.observer.inner().stop();

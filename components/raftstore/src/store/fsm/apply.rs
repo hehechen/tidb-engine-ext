@@ -996,6 +996,9 @@ where
     /// The counter of pending request snapshots. See more in `Peer`.
     pending_request_snapshot_count: Arc<AtomicUsize>,
 
+    /// The max compact index from leader
+    max_compact_index: u64,
+    max_compact_term: u64,
     /// Indicates the peer is in merging, if that compact log won't be
     /// performed.
     is_merging: bool,
@@ -1063,6 +1066,8 @@ where
             ready_source_region_id: 0,
             yield_state: None,
             wait_merge_state: None,
+            max_compact_index: 0,
+            max_compact_term: 0,
             is_merging: reg.is_merging,
             pending_cmds: PendingCmdQueue::new(),
             metrics: Default::default(),
@@ -1420,6 +1425,21 @@ where
                 let uuid = req.get_header().get_uuid().to_vec();
                 resp.mut_header().set_uuid(uuid);
             }
+            if req.has_admin_request()
+            {
+                let request = req.get_admin_request();
+                let cmd_type = request.get_cmd_type();
+                if cmd_type == AdminCmdType::CompactLog
+                {
+                    let compact_index = request.get_compact_log().get_compact_index();
+                    let compact_term = request.get_compact_log().get_compact_term();
+                    if compact_index > self.max_compact_index
+                    {
+                        self.max_compact_index = compact_index;
+                        self.max_compact_term = compact_term;
+                    }
+                }
+            }
             (resp, ApplyResult::None)
         } else {
             ctx.exec_log_index = index;
@@ -1685,7 +1705,7 @@ where
             AdminCmdType::ChangePeerV2 => self.exec_change_peer_v2(ctx, request),
             AdminCmdType::Split => self.exec_split(ctx, request),
             AdminCmdType::BatchSplit => self.exec_batch_split(ctx, request),
-            AdminCmdType::CompactLog => self.exec_compact_log(request),
+            AdminCmdType::CompactLog => self.exec_compact_log(ctx, request),
             AdminCmdType::TransferLeader => self.exec_transfer_leader(request, ctx.exec_log_term),
             AdminCmdType::ComputeHash => self.exec_compute_hash(ctx, request),
             AdminCmdType::VerifyHash => self.exec_verify_hash(ctx, request),
@@ -3006,6 +3026,7 @@ where
         &mut self,
         voter_replicated_index: u64,
         voter_replicated_term: u64,
+        use_queue: bool,
     ) -> Result<(bool, Option<ExecResult<EK::Snapshot>>)> {
         PEER_ADMIN_CMD_COUNTER.compact.all.inc();
         let first_index = entry_storage::first_index(&self.apply_state);
@@ -3018,6 +3039,39 @@ where
                 "voter_replicated_index" => voter_replicated_index,
             );
             return Ok((false, None));
+        }
+
+        if !use_queue {
+            let mut compact_index = voter_replicated_index;
+            let mut compact_term = voter_replicated_term;
+            if compact_index > self.max_compact_index
+            {
+                compact_index = self.max_compact_index;
+                compact_term = self.max_compact_term;
+            }
+            if compact_index < first_index
+            {
+                debug!(
+                    "compact_index < first index, no need to compact";
+                    "region_id" => self.region_id(),
+                    "peer_id" => self.id(),
+                    "compact_index" => compact_index,
+                    "first_index" => first_index,
+                );
+                return Ok((false, Some(ExecResult::HasPendingCompactCmd(false))));
+            }
+            compact_raft_log(
+                    &self.tag,
+                    &mut self.apply_state,
+                    compact_index,
+                    compact_term,
+                )?;
+            PEER_ADMIN_CMD_COUNTER.compact.success.inc();
+                return Ok((true,                     Some(ExecResult::CompactLog {
+                    state: self.apply_state.get_truncated_state().clone(),
+                    first_index,
+                    has_pending: false,
+                }),));
         }
 
         // When the witness restarted, the pending compact cmd has been lost, so use
@@ -3072,6 +3126,7 @@ where
 
     fn exec_compact_log(
         &mut self,
+        ctx: &mut ApplyContext<EK>,
         req: &AdminRequest,
     ) -> Result<(AdminResponse, ApplyResult<EK::Snapshot>)> {
         PEER_ADMIN_CMD_COUNTER.compact.all.inc();
@@ -3151,6 +3206,23 @@ where
                     cmd.cb.take().unwrap();
                 }
             }
+        }
+        (compact_index, compact_term) = ctx.host.get_compact_index_and_term(self.region_id(), compact_index, compact_term);
+        if req.get_compact_log().get_compact_index() > compact_index && compact_index > self.max_compact_index
+        {
+            self.max_compact_index = req.get_compact_log().get_compact_index();
+            self.max_compact_term = req.get_compact_log().get_compact_term();
+        }
+        if compact_index < first_index {
+            debug!(
+                "compact index < first index, no need to compact";
+                "region_id" => self.region_id(),
+                "peer_id" => self.id(),
+                "compact_index" => compact_index,
+                "first_index" => first_index,
+                "leader compact index" => req.get_compact_log().get_compact_index(),
+            );
+            return Ok((resp, ApplyResult::None));
         }
         // compact failure is safe to be omitted, no need to assert.
         compact_raft_log(
@@ -3717,6 +3789,7 @@ where
         region_id: u64,
         voter_replicated_index: u64,
         voter_replicated_term: u64,
+        applied_index: u64,
     },
 }
 
@@ -3790,6 +3863,7 @@ where
                 region_id,
                 voter_replicated_index,
                 voter_replicated_term,
+                applied_index,
             } => {
                 write!(
                     f,
@@ -4256,6 +4330,7 @@ where
         ctx: &mut ApplyContext<EK>,
         voter_replicated_index: u64,
         voter_replicated_term: u64,
+        applied_index: u64,
     ) {
         if self.delegate.pending_remove || self.delegate.stopped {
             return;
@@ -4263,12 +4338,17 @@ where
 
         let res = self
             .delegate
-            .try_compact_log(voter_replicated_index, voter_replicated_term);
+            .try_compact_log(voter_replicated_index, voter_replicated_term, ctx.host.compact_log_in_queue());
         match res {
             Ok((should_write, res)) => {
                 if let Some(res) = res {
                     if ctx.timer.is_none() {
                         ctx.timer = Some(Instant::now_coarse());
+                    }
+                    let origin_applied_index = self.delegate.apply_state.get_applied_index();
+                    let need_reset_applied_index = ctx.host.need_reset_applied_index();
+                    if (need_reset_applied_index) {
+                        self.delegate.apply_state.set_applied_index(applied_index);
                     }
                     ctx.prepare_for(&mut self.delegate);
                     let mut result = VecDeque::new();
@@ -4279,7 +4359,17 @@ where
                         ctx.commit_opt(&mut self.delegate, true);
                     }
                     result.push_back(res);
+                    if (need_reset_applied_index) {
+                        self.delegate.apply_state.set_applied_index(origin_applied_index);
+                    }
                     ctx.finish_for(&mut self.delegate, result);
+
+                    info!(
+                        "trigger compact log";
+                        "region_id" => self.delegate.region.get_id(),
+                        "applied_index" => applied_index,
+                        "origin applied_index" => origin_applied_index,
+                    );
                 }
             }
             Err(e) => error!(?e;
@@ -4368,12 +4458,14 @@ where
                 Msg::CheckCompact {
                     voter_replicated_index,
                     voter_replicated_term,
+                    applied_index,
                     ..
                 } => {
                     self.check_pending_compact_log(
                         apply_ctx,
                         voter_replicated_index,
                         voter_replicated_term,
+                        applied_index,
                     );
                 }
             }
